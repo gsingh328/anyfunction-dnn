@@ -2,51 +2,35 @@ import torch
 from anyf import AnyF1
 
 
-# b = 2
-# i = 4
-# h = 5
+# b = 128
+# i = 12000
+# h = 10
 
-
-# af1 = AnyF1(i, h)
-
-# with torch.no_grad():
-#     af1.weight1.mul_(10.).round_()
-#     af1.weight2.mul_(10.).round_()
-#     af1.bias1.mul_(10.).round_()
-#     af1.bias2.mul_(10.).round_()
-
-# x = (torch.randn(b, i) * 10).round()
+# x = torch.randn(b, i)
+# af1 = AnyF1(i, h, actv_out=False)
 # y = af1(x)
+# print(x.var(), y.var())
 
+b = 128
+h = 20
+i_c = 1
+i_h = 7
+i_w = 7
+
+x = (torch.randn(b, i_c, i_h, i_w) * 10).floor_()
 # print("\n" + "x:" + "-" * 40)
 # print(x.shape)
 # print(x)
 
+# w1 = (torch.randn(1, i_c, i_h, i_w, h) * 10).floor_()
 # print("\n" + "w1:" + "-" * 40)
-# print(af1.weight1.shape)
-# print(af1.weight1)
+# print(w1.shape)
+# print(w1)
 
-# print("\n" + "b1:" + "-" * 40)
-# print(af1.bias1.shape)
-# print(af1.bias1)
+# y1 = x.view(-1, i_c, i_h, i_w, 1).mul(w1)
+# print("\n" + "y1:" + "-" * 40)
+# print(y1.shape)
+# print(y1)
 
-# print("\n" + "w2:" + "-" * 40)
-# print(af1.weight2.shape)
-# print(af1.weight2)
-
-# print("\n" + "b2:" + "-" * 40)
-# print(af1.bias2.shape)
-# print(af1.bias2)
-
-# print("\n" + "y:" + "-" * 40)
-# print(y.shape)
-# print(y)
-
-b = 128
-i = 12000
-h = 10
-
-x = torch.randn(b, i)
-af1 = AnyF1(i, h, reLU_out=False)
-y = af1(x)
-print(x.var(), y.var())
+af1 = AnyF1((i_c, i_h, i_w), h, actv_out=False)
+af1.debug_print_graph()

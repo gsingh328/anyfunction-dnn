@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torchvision import datasets, transforms
-from torch.optim.lr_scheduler import StepLR
+from torch.optim.lr_scheduler import MultiStepLR
 
 
 DATASET="MNIST"
@@ -129,14 +129,17 @@ def main():
     # optimizer = optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.wd, momentum=0.7)
     criterion = nn.CrossEntropyLoss()
 
+    scheduler = MultiStepLR(optimizer, milestones=[35], gamma=0.1)
     # scheduler = StepLR(optimizer, step_size=1, gamma=args.gamma)
     for epoch in range(1, args.epochs + 1):
         train(args, model, device, train_loader, optimizer, criterion, epoch)
         test(model, device, test_loader, criterion)
-        # scheduler.step()
+        scheduler.step()
 
     if args.save_model:
         torch.save(model.state_dict(), "mnist_cnn.pt")
+
+    # model.af1.debug_print_graph()
 
 
 if __name__ == '__main__':
