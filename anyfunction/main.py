@@ -5,15 +5,18 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torchvision import datasets, transforms
-from torch.optim.lr_scheduler import MultiStepLR
+from torch.optim.lr_scheduler import MultiStepLR, StepLR
 
 
-DATASET="MNIST"
+DATASET="CIFAR10"
 
 if DATASET == "MNIST":
     from mnist_model import Net
 elif DATASET == "CIFAR10":
     from cifar10_model import Net
+    # from resnet import ResNet18 as Net
+    # from models import MobileNet as Net
+    # from models import EfficientNetB0 as Net
 
 
 def train(args, model, device, train_loader, optimizer, criterion, epoch):
@@ -62,8 +65,8 @@ def main():
                         help='input batch size for training (default: 64)')
     parser.add_argument('--test-batch-size', type=int, default=1000, metavar='N',
                         help='input batch size for testing (default: 1000)')
-    parser.add_argument('--epochs', type=int, default=14, metavar='N',
-                        help='number of epochs to train (default: 14)')
+    parser.add_argument('--epochs', type=int, default=100, metavar='N',
+                        help='number of epochs to train (default: 100)')
     parser.add_argument('--lr', type=float, default=1e-3, metavar='LR',
                         help='learning rate (default: 1e-3)')
     parser.add_argument('--wd', type=float, default=1e-5, metavar='WD',
@@ -125,12 +128,15 @@ def main():
     test_loader = torch.utils.data.DataLoader(testset, **test_kwargs)
 
     model = Net().to(device)
+    # print(model)
+    # exit(1)
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.wd)
     # optimizer = optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.wd, momentum=0.7)
     criterion = nn.CrossEntropyLoss()
 
-    scheduler = MultiStepLR(optimizer, milestones=[35], gamma=0.1)
+    scheduler = MultiStepLR(optimizer, milestones=[80], gamma=0.1)
     # scheduler = StepLR(optimizer, step_size=1, gamma=args.gamma)
+    
     for epoch in range(1, args.epochs + 1):
         train(args, model, device, train_loader, optimizer, criterion, epoch)
         test(model, device, test_loader, criterion)

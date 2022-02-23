@@ -211,7 +211,7 @@ class AnyF2(Module):
             plt.savefig(os.path.join(log_folder, "{}plot_{}.png").format(prefix, inp))
             plt.clf()
 
-
+# For normal matrices
 class GroupedTransform(Module):
     def __init__(self, group_count) -> None:
         super(GroupedTransform, self).__init__()
@@ -227,27 +227,196 @@ class GroupedTransform(Module):
         x = torch.flatten(input, 1)
         filler = torch.zeros(x.shape[0], int(new_nelems) - int(nelems)).to(input.device)
 
-        y = torch.cat((x, filler), 1).reshape(shape[0], -1, self.group_count)
-        return torch.swapaxes(y, 0, 1)
+        x = torch.cat((x, filler), 1).reshape(shape[0], -1, self.group_count)
+        return x
 
+# For 2D images. The transformation occurs channel-wise, so the grouping will fold channels
+class GroupedTransform2D(Module):
+    def __init__(self, group_count) -> None:
+        super(GroupedTransform2D, self).__init__()
+        self.group_count = group_count
+
+
+    def forward(self, input: Tensor) -> Tensor:
+        shape = torch.IntTensor(list(input.shape))
+        nchannels = torch.prod(shape[1])
+
+        new_nchannels = torch.ceil(nchannels / self.group_count) * self.group_count
+
+        x = input
+        if new_nchannels > nchannels:
+            filler = torch.zeros(x.shape[0], int(new_nchannels) - int(nchannels), shape[2], shape[3]).to(input.device)
+            x = torch.cat((x, filler), 1)
+
+        x = x.reshape(shape[0], int(new_nchannels/self.group_count), int(self.group_count), shape[2], shape[3])
+        return x
 
 
 class PositionalEncoding(Module):
-    def __init__(self, d_model: int, max_len: int = 5000):
+    def __init__(self, d_model: int, max_len: int = 5000, pe_multiplier: float = 1., base_freq: float = 10000.):
         super(PositionalEncoding, self).__init__()
         self.max_len = max_len
+        self.pe_multiplier = pe_multiplier
+
+        if d_model % 2 == 1:
+            d_model += 1
+
         position = torch.arange(max_len).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
-        pe = torch.zeros(max_len, 1, d_model)
-        pe[:, 0, 0::2] = torch.sin(position * div_term)
-        pe[:, 0, 1::2] = torch.cos(position * div_term)
+        div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(base_freq) / d_model))
+
+        pe = torch.zeros(1, max_len, d_model)
+        pe[0, :, 0::2] = torch.sin(position * div_term)
+        pe[0, :, 1::2] = torch.cos(position * div_term)
+        
         self.register_buffer('pe', pe)
+
+        self.in_max_len = 0
 
     def forward(self, x: Tensor) -> Tensor:
         """
         Args:
-            x: Tensor, shape [seq_len, batch_size, embedding_dim]
+            x: Tensor, shape [batch_size, seq_len, embedding_dim]
         """
-        assert (x.shape[0] < self.max_len)
-        x = x + self.pe[:x.size(0)]
+        assert x.shape[1] < self.max_len, "{} must be greater than {}".format(x.shape[1], self.max_len)
+        assert x.shape[2] <= self.pe.shape[2], "{} must be less than or equal to {}".format(x.shape[2], self.pe.shape[2])
+
+        # current_len = x.shape[1]
+        # if self.in_max_len < current_len:
+        #     self.in_max_len = current_len
+        #     print(current_len)
+        #     print(x.shape[2])
+
+        x = (x + self.pe_multiplier * self.pe[0, :x.size(1), :x.size(2)]) / (1. + self.pe_multiplier)
         return x
+
+
+class PositionalEncoding2D(PositionalEncoding):
+    def __init__(self, *args, **kwargs):
+        super(PositionalEncoding2D, self).__init__(*args, **kwargs)
+
+    def forward(self, x: Tensor) -> Tensor:
+        """
+        Args:
+            x: Tensor, shape [batch_size, seq_len, channel, width, height]
+        """
+        x_org_shape = x.shape
+
+        """
+        Positional offset applied to channel, ie each pixel in width x height image has the same offset.
+        """
+        # Move the width and height adjacent to batch_dim and merge
+        x = x.swapaxes(1, 3)
+        x = x.swapaxes(2, 4)
+
+        x_shape = x.shape
+        x = x.reshape(x_shape[0] * x_shape[1] * x_shape[2], x_shape[3], x_shape[4])
+        x = super().forward(x)
+
+        # Undo merge + swap
+        x = x.reshape(*x_shape)
+
+        x = x.swapaxes(1, 3)
+        x = x.swapaxes(2, 4)
+
+        """
+        Positional offset applied to image, ie the image per channel is flattened as offset applied.
+        So channelwise the same offset exists
+        """
+        """
+        # Move the channel dim adjacent to batch_dim and merge
+        x = x.swapaxes(1, 2)
+
+        x_shape = x.shape
+        x = x.reshape(x_shape[0] * x_shape[1], x_shape[2], x_shape[3] * x_shape[4])
+        x = super().forward(x)
+
+        # Undo merge + swap
+        x = x.reshape(*x_shape)
+
+        x = x.swapaxes(1, 2)
+        """
+        """
+        Positional offset applied to image + channel.
+        So channel + image is flattened and then offset is applied.
+        """
+
+        # x = x.reshape(x_org_shape[0], x_org_shape[1] * x_org_shape[2], x_org_shape[3] * x_org_shape[4])
+        # x = super().forward(x)
+
+        x = x.reshape(x_org_shape)
+        return x
+
+
+class BinaryPositionalEncoding(Module):
+    def __init__(self, d_model: int, max_len: int = 5000, pe_multiplier: float = 1.):
+        super(BinaryPositionalEncoding, self).__init__()
+        self.max_len = max_len
+        self.pe_multiplier = pe_multiplier
+
+        # Binary Vector representation
+        bit_mask = 2**torch.arange(d_model).byte()
+        pe = torch.arange(1, max_len).byte().unsqueeze(-1).bitwise_and(bit_mask).ne(0).float()
+
+        # Normalise between -1 and 1
+        pe = 2.* pe - 1
+
+        # Add the batch dimension. All batches will have some positional offset
+        pe = pe.unsqueeze(0)
+        
+        self.register_buffer('pe', pe)
+
+        self.in_max_len = 0
+ 
+    def forward(self, x: Tensor) -> Tensor:
+        """
+        Args:
+            x: Tensor, shape [batch_size, seq_len, embedding_dim]
+        """
+        assert x.shape[1] < self.max_len, "{} must be greater than {}".format(x.shape[1], self.max_len)
+        assert x.shape[2] <= self.pe.shape[2], "{} must be less than or equal to {}".format(x.shape[2], self.pe.shape[2])
+
+        # current_len = x.shape[1]
+        # if self.in_max_len < current_len:
+        #     self.in_max_len = current_len
+        #     print(current_len)
+        #     print(x.shape[2])
+
+        x = (x + self.pe_multiplier * self.pe[0, :x.size(1), :x.size(2)]) / (1. + self.pe_multiplier)
+        return x
+
+
+class UniformRandomPositionalEncoding(Module):
+    def __init__(self, d_model: int, max_len: int = 5000, pe_multiplier: float = 1.):
+        super(UniformRandomPositionalEncoding, self).__init__()
+        self.max_len = max_len
+        self.pe_multiplier = pe_multiplier
+
+        pe = torch.rand(int(max_len), int(d_model))
+
+        # Normalise between -1 and 1
+        pe = 2.* pe - 1
+
+        # Add the batch dimension. All batches will have some positional offset
+        pe = pe.unsqueeze(0)
+        
+        self.register_buffer('pe', pe)
+
+        self.in_max_len = 0
+ 
+    def forward(self, x: Tensor) -> Tensor:
+        """
+        Args:
+            x: Tensor, shape [batch_size, seq_len, embedding_dim]
+        """
+        assert x.shape[1] < self.max_len, "{} must be greater than {}".format(x.shape[1], self.max_len)
+        assert x.shape[2] <= self.pe.shape[2], "{} must be less than or equal to {}".format(x.shape[2], self.pe.shape[2])
+
+        # current_len = x.shape[1]
+        # if self.in_max_len < current_len:
+        #     self.in_max_len = current_len
+        #     print(current_len)
+        #     print(x.shape[2])
+
+        x = (x + self.pe_multiplier * self.pe[0, :x.size(1), :x.size(2)]) / (1. + self.pe_multiplier)
+        return x
+

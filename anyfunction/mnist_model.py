@@ -2,7 +2,7 @@ from typing import Any
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from anyf import AnyF1, GroupedTransform, PositionalEncoding, AnyF2
+from anyf import *
 
 
 class BasicCNN(nn.Module):
@@ -33,13 +33,28 @@ class BasicCNN(nn.Module):
 class BasicMLP(nn.Module):
     def __init__(self):
         super(BasicMLP, self).__init__()
-        self.fc1 = nn.Linear(1*14*14, 32)
-        self.fc2 = nn.Linear(32, 10)
+
+        fold_factor = 4
+        isize = int(28*28/fold_factor)
+        
+        self.gr = GroupedTransform(isize)
+        self.p = PositionalEncoding(isize, fold_factor + 2, base_freq=10000.)
+        
+        self.fc1 = nn.Linear(isize, 64)
+        self.nrm = nn.BatchNorm1d(64)
+        self.fc2 = nn.Linear(64, 10)
 
     def forward(self, x):
-        x = F.avg_pool2d(x, 2)
+        # x = F.avg_pool2d(x, 2)
         x = torch.flatten(x, 1)
+
+        x = self.gr(x)
+        x = self.p(x)
         x = F.relu(self.fc1(x))
+
+        x = x.sum(dim=1)
+        x = self.nrm(x)
+
         x = self.fc2(x)
         return x
 
@@ -88,8 +103,8 @@ class BasicMLP_AnyF(nn.Module):
 
 def Net(*args, **kwargs):
     # net = BasicCNN(*args, **kwargs)
-    # net = BasicMLP(*args, **kwargs)
-    net = BasicMLP_AnyF(*args, **kwargs)
+    net = BasicMLP(*args, **kwargs)
+    # net = BasicMLP_AnyF(*args, **kwargs)
     pytorch_total_params = sum(p.numel() for p in net.parameters() if p.requires_grad)
     print("Total parameters: {}".format(pytorch_total_params))
     return net
